@@ -10,6 +10,8 @@ import * as subs from "aws-cdk-lib/aws-sns-subscriptions";
 import * as iam from "aws-cdk-lib/aws-iam";
 
 import { Construct } from "constructs";
+
+import { Duration, RemovalPolicy } from "aws-cdk-lib";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export class EDAAppStack extends cdk.Stack {
@@ -23,13 +25,19 @@ export class EDAAppStack extends cdk.Stack {
     });
 
     // Integration infrastructure
-
-  // const queue = new sqs.Queue(this, "img-created-queue", {
-  //   receiveMessageWaitTime: cdk.Duration.seconds(10),
-  // });
+    
+    const badImageProcessQueue = new sqs.Queue(this, "img-bad-queue", {
+      receiveMessageWaitTime: cdk.Duration.seconds(10),
+      retentionPeriod: Duration.minutes(30),
+    });
 
   const imageProcessQueue = new sqs.Queue(this, "img-created-queue", {
     receiveMessageWaitTime: cdk.Duration.seconds(10),
+    deadLetterQueue: {
+      queue: badImageProcessQueue,
+      // # of rejections by consumer (lambda function)
+      maxReceiveCount: 2,
+    },
   });
 
   const newImageTopic = new sns.Topic(this, "NewImageTopic", {
@@ -38,6 +46,10 @@ export class EDAAppStack extends cdk.Stack {
 
 
   const mailerQ = new sqs.Queue(this, "mailer-queue", {
+    receiveMessageWaitTime: cdk.Duration.seconds(10),
+  });
+
+  const badMailerQ = new sqs.Queue(this, "bad-mailer-queue", {
     receiveMessageWaitTime: cdk.Duration.seconds(10),
   });
 
@@ -55,6 +67,14 @@ export class EDAAppStack extends cdk.Stack {
     }
   );
 
+  const failedImageFn = new lambdanode.NodejsFunction(this, "FailedImageFn", {
+    // architecture: lambda.Architecture.ARM_64,
+    runtime: lambda.Runtime.NODEJS_16_X,
+    entry: `${__dirname}/../lambdas/handleBadImage.ts`,
+    timeout: Duration.seconds(10),
+    memorySize: 128,
+  });
+
   const mailerFn = new lambdanode.NodejsFunction(this, "mailer-function", {
     runtime: lambda.Runtime.NODEJS_16_X,
     memorySize: 1024,
@@ -62,19 +82,14 @@ export class EDAAppStack extends cdk.Stack {
     entry: `${__dirname}/../lambdas/mailer.ts`,
   });
 
+  const badMailerFn = new lambdanode.NodejsFunction(this, "bad-mailer-function", {
+    runtime: lambda.Runtime.NODEJS_16_X,
+    memorySize: 1024,
+    timeout: cdk.Duration.seconds(3),
+    entry: `${__dirname}/../lambdas/badMailer.ts`,
+  });
+
   // Event triggers
-
-  // imagesBucket.addEventNotification(
-  //   s3.EventType.OBJECT_CREATED,
-  //   new s3n.SqsDestination(queue)
-  // );
-
-  // const newImageEventSource = new events.SqsEventSource(queue, {
-  //   batchSize: 5,
-  //   maxBatchingWindow: cdk.Duration.seconds(10),
-  // });
-
-  // processImageFn.addEventSource(newImageEventSource);
 
   imagesBucket.addEventNotification(
     s3.EventType.OBJECT_CREATED,
@@ -94,13 +109,34 @@ export class EDAAppStack extends cdk.Stack {
       maxBatchingWindow: cdk.Duration.seconds(10),
     }); 
 
+    const newBadImageMailEventSource = new events.SqsEventSource(badMailerQ, {
+      batchSize: 5,
+      maxBatchingWindow: cdk.Duration.seconds(10),
+    }); 
+
     mailerFn.addEventSource(newImageMailEventSource);
+
+    badMailerFn.addEventSource(newBadImageMailEventSource);
 
   // Permissions
 
   imagesBucket.grantRead(processImageFn);
 
+  imagesBucket.grantRead(failedImageFn);
+
   mailerFn.addToRolePolicy(
+    new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        "ses:SendEmail",
+        "ses:SendRawEmail",
+        "ses:SendTemplatedEmail",
+      ],
+      resources: ["*"],
+    })
+  );
+
+  badMailerFn.addToRolePolicy(
     new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: [
