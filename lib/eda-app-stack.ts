@@ -12,6 +12,7 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
 
 import { Duration, RemovalPolicy } from "aws-cdk-lib";
+import { SqsDestination } from "aws-cdk-lib/aws-lambda-destinations";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export class EDAAppStack extends cdk.Stack {
@@ -26,7 +27,7 @@ export class EDAAppStack extends cdk.Stack {
 
     // Integration infrastructure
     
-    const badImageProcessQueue = new sqs.Queue(this, "img-bad-queue", {
+    const badImageQueue = new sqs.Queue(this, "img-bad-queue", {
       receiveMessageWaitTime: cdk.Duration.seconds(10),
       retentionPeriod: Duration.minutes(30),
     });
@@ -34,8 +35,7 @@ export class EDAAppStack extends cdk.Stack {
   const imageProcessQueue = new sqs.Queue(this, "img-created-queue", {
     receiveMessageWaitTime: cdk.Duration.seconds(10),
     deadLetterQueue: {
-      queue: badImageProcessQueue,
-      // # of rejections by consumer (lambda function)
+      queue: badImageQueue,
       maxReceiveCount: 2,
     },
   });
@@ -62,18 +62,11 @@ export class EDAAppStack extends cdk.Stack {
       // architecture: lambda.Architecture.ARM_64,
       runtime: lambda.Runtime.NODEJS_18_X,
       entry: `${__dirname}/../lambdas/processImage.ts`,
+      onFailure: new SqsDestination(badImageQueue),
       timeout: cdk.Duration.seconds(15),
       memorySize: 128,
     }
   );
-
-  const failedImageFn = new lambdanode.NodejsFunction(this, "FailedImageFn", {
-    // architecture: lambda.Architecture.ARM_64,
-    runtime: lambda.Runtime.NODEJS_16_X,
-    entry: `${__dirname}/../lambdas/handleBadImage.ts`,
-    timeout: Duration.seconds(10),
-    memorySize: 128,
-  });
 
   const mailerFn = new lambdanode.NodejsFunction(this, "mailer-function", {
     runtime: lambda.Runtime.NODEJS_16_X,
@@ -97,12 +90,32 @@ export class EDAAppStack extends cdk.Stack {
 );
 
   newImageTopic.addSubscription(
-    new subs.SqsSubscription(imageProcessQueue)
+    new subs.SqsSubscription(imageProcessQueue, {
+      filterPolicyWithMessageBody: {
+        Records: sns.FilterOrPolicy.policy({
+          s3: sns.FilterOrPolicy.policy({
+            object: sns.FilterOrPolicy.policy({
+              key: sns.FilterOrPolicy.filter(
+                sns.SubscriptionFilter.stringFilter({
+                  matchPrefixes: ['*.jpeg', '.png'],
+                }),
+
+              ),
+            }),
+          }),
+        })
+      },
+      rawMessageDelivery: true,
+    })
   );
 
   newImageTopic.addSubscription(
     new subs.SqsSubscription(mailerQ)
     );
+
+    newImageTopic.addSubscription(
+      new subs.SqsSubscription(badMailerQ)
+      );
 
     const newImageMailEventSource = new events.SqsEventSource(mailerQ, {
       batchSize: 5,
@@ -121,8 +134,6 @@ export class EDAAppStack extends cdk.Stack {
   // Permissions
 
   imagesBucket.grantRead(processImageFn);
-
-  imagesBucket.grantRead(failedImageFn);
 
   mailerFn.addToRolePolicy(
     new iam.PolicyStatement({
