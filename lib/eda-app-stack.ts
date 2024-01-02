@@ -14,6 +14,7 @@ import { Construct } from "constructs";
 import { Duration, RemovalPolicy } from "aws-cdk-lib";
 import { SqsDestination } from "aws-cdk-lib/aws-lambda-destinations";
 import { AttributeType, BillingMode, StreamViewType, Table } from "aws-cdk-lib/aws-dynamodb";
+import { StartingPosition } from "aws-cdk-lib/aws-lambda";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export class EDAAppStack extends cdk.Stack {
@@ -26,13 +27,13 @@ export class EDAAppStack extends cdk.Stack {
       publicReadAccess: false,
     });
 
-    // const imageTable = new Table(this, "ImageTable", {
-    //   billingMode: BillingMode.PAY_PER_REQUEST,
-    //   partitionKey: { name: "imageName", type: AttributeType.STRING },
-    //   removalPolicy: cdk.RemovalPolicy.DESTROY,
-    //   tableName: "Images",
-    //   stream: StreamViewType.KEYS_ONLY,
-    // })
+    const imageTable = new Table(this, "ImageTable", {
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      partitionKey: { name: "imageName", type: AttributeType.STRING },
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      tableName: "Images",
+      stream: StreamViewType.NEW_IMAGE,
+    })
 
     // Integration infrastructure
     
@@ -74,6 +75,9 @@ export class EDAAppStack extends cdk.Stack {
       onFailure: new SqsDestination(badImageQueue),
       timeout: cdk.Duration.seconds(15),
       memorySize: 128,
+      environment: {
+        REGION: cdk.Aws.REGION,
+      },
     }
   );
 
@@ -135,6 +139,12 @@ export class EDAAppStack extends cdk.Stack {
     mailerFn.addEventSource(newImageMailEventSource);
 
     badMailerFn.addEventSource(newBadImageMailEventSource);
+
+    processImageFn.addEventSource(
+      new events.DynamoEventSource(imageTable, {
+        startingPosition: StartingPosition.LATEST,
+      })
+    )
 
   // Permissions
 
