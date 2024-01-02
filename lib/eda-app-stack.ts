@@ -15,7 +15,14 @@ import { Duration, RemovalPolicy } from "aws-cdk-lib";
 import { SqsDestination } from "aws-cdk-lib/aws-lambda-destinations";
 import { AttributeType, BillingMode, StreamViewType, Table } from "aws-cdk-lib/aws-dynamodb";
 import { StartingPosition } from "aws-cdk-lib/aws-lambda";
+import { DynamoEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
+import { DynamoDB, DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
+
+// const AWS = require("aws-sdk");
+// const docClient = new AWS.DynamoDB.DocumentClient();
+
 
 export class EDAAppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -77,6 +84,7 @@ export class EDAAppStack extends cdk.Stack {
       memorySize: 128,
       environment: {
         REGION: cdk.Aws.REGION,
+        TABLE_NAME: imageTable.tableName,
       },
     }
   );
@@ -141,7 +149,7 @@ export class EDAAppStack extends cdk.Stack {
     badMailerFn.addEventSource(newBadImageMailEventSource);
 
     processImageFn.addEventSource(
-      new events.DynamoEventSource(imageTable, {
+      new DynamoEventSource(imageTable, {
         startingPosition: StartingPosition.LATEST,
       })
     )
@@ -149,6 +157,8 @@ export class EDAAppStack extends cdk.Stack {
   // Permissions
 
   imagesBucket.grantRead(processImageFn);
+
+  imageTable.grantWriteData(processImageFn);
 
   mailerFn.addToRolePolicy(
     new iam.PolicyStatement({
@@ -180,4 +190,26 @@ export class EDAAppStack extends cdk.Stack {
     value: imagesBucket.bucketName,
   });
   }
+}
+
+ 
+const ddbDocClient = new DynamoDBClient({ region: process.env.REGION });
+
+exports.handler = async (event: { Records: { s3: any; }[]; }) => {
+  // Get the S3 event
+  const s3Event = event.Records[0].s3;
+
+  // Get the key of the new object
+  const key = s3Event.object.key;
+
+  // Get the table name from the environment variable
+  const tableName = process.env.TABLE_NAME;
+
+  // Put the key into the table
+  const commandOutput = await ddbDocClient.send(
+    new PutCommand({
+      TableName: tableName,
+      Item:  key ,
+    })
+  );
 }
