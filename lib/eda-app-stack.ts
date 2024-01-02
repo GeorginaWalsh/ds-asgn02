@@ -76,7 +76,7 @@ export class EDAAppStack extends cdk.Stack {
     this,
     "ProcessImageFn",
     {
-      // architecture: lambda.Architecture.ARM_64,
+      architecture: lambda.Architecture.ARM_64,
       runtime: lambda.Runtime.NODEJS_18_X,
       entry: `${__dirname}/../lambdas/processImage.ts`,
       onFailure: new SqsDestination(badImageQueue),
@@ -86,7 +86,7 @@ export class EDAAppStack extends cdk.Stack {
         REGION: cdk.Aws.REGION,
         TABLE_NAME: imageTable.tableName,
       },
-    }
+    },
   );
 
   const mailerFn = new lambdanode.NodejsFunction(this, "mailer-function", {
@@ -103,12 +103,26 @@ export class EDAAppStack extends cdk.Stack {
     entry: `${__dirname}/../lambdas/badMailer.ts`,
   });
 
+  const addToTableFn = new lambdanode.NodejsFunction(this, "add-to-table-function", {
+    architecture: lambda.Architecture.ARM_64,
+    runtime: lambda.Runtime.NODEJS_16_X,
+    memorySize: 1024,
+    timeout: cdk.Duration.seconds(15),
+    entry: `${__dirname}/../lambdas/addToTable.ts`,
+    handler: "handler",
+    environment: {
+      REGION: cdk.Aws.REGION,
+      TABLE_NAME: imageTable.tableName,
+    },
+  });
+
   // Event triggers
 
   imagesBucket.addEventNotification(
     s3.EventType.OBJECT_CREATED,
     new s3n.SnsDestination(newImageTopic)  // Changed
 );
+
 
   newImageTopic.addSubscription(
     new subs.SqsSubscription(imageProcessQueue, {
@@ -127,11 +141,11 @@ export class EDAAppStack extends cdk.Stack {
         })
       },
       rawMessageDelivery: true,
-    })
+    }),
   );
 
   newImageTopic.addSubscription(
-    new subs.SqsSubscription(mailerQ)
+    new subs.SqsSubscription(mailerQ),
     );
 
     const newImageMailEventSource = new events.SqsEventSource(mailerQ, {
@@ -149,16 +163,41 @@ export class EDAAppStack extends cdk.Stack {
     badMailerFn.addEventSource(newBadImageMailEventSource);
 
     processImageFn.addEventSource(
-      new DynamoEventSource(imageTable, {
+      new events.DynamoEventSource(imageTable, {
         startingPosition: StartingPosition.LATEST,
       })
     )
+
+    addToTableFn.addEventSource(
+      new events.DynamoEventSource(imageTable, {
+        startingPosition: StartingPosition.LATEST,
+      })
+    )
+
+    // processImageFn.addEventSource(
+    //   new events.PutCommand( {
+    //       TableName: process.env.REVIEW_TABLE_NAME,
+    //       Item:   key,
+    //     })
+    // )
+
+  // exports.handler = async (event: { Records: { s3: any; }[]; }) => {
+  // const s3Event = event.Records[0].s3;
+  // const key = s3Event.object.key;
+    // const key = 
+    // const addItemToTable = new PutCommand( {
+    //   TableName: process.env.REVIEW_TABLE_NAME,
+    //   Item:   key,
+    // })
+
 
   // Permissions
 
   imagesBucket.grantRead(processImageFn);
 
-  imageTable.grantWriteData(processImageFn);
+  imageTable.grantReadWriteData(processImageFn);
+  imageTable.grantReadWriteData(addToTableFn);
+  // imageTable.grantWriteData(newImageTopic);
 
   mailerFn.addToRolePolicy(
     new iam.PolicyStatement({
