@@ -13,6 +13,7 @@ import { Construct } from "constructs";
 
 import { Duration, RemovalPolicy } from "aws-cdk-lib";
 import { SqsDestination } from "aws-cdk-lib/aws-lambda-destinations";
+import { AttributeType, BillingMode, StreamViewType, Table } from "aws-cdk-lib/aws-dynamodb";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export class EDAAppStack extends cdk.Stack {
@@ -24,6 +25,14 @@ export class EDAAppStack extends cdk.Stack {
       autoDeleteObjects: true,
       publicReadAccess: false,
     });
+
+    // const imageTable = new Table(this, "ImageTable", {
+    //   billingMode: BillingMode.PAY_PER_REQUEST,
+    //   partitionKey: { name: "imageName", type: AttributeType.STRING },
+    //   removalPolicy: cdk.RemovalPolicy.DESTROY,
+    //   tableName: "Images",
+    //   stream: StreamViewType.KEYS_ONLY,
+    // })
 
     // Integration infrastructure
     
@@ -97,7 +106,7 @@ export class EDAAppStack extends cdk.Stack {
             object: sns.FilterOrPolicy.policy({
               key: sns.FilterOrPolicy.filter(
                 sns.SubscriptionFilter.stringFilter({
-                  matchPrefixes: ['*.jpeg', '.png'],
+                  matchPrefixes: ["*.jpeg", "*.png"],
                 }),
 
               ),
@@ -112,10 +121,6 @@ export class EDAAppStack extends cdk.Stack {
   newImageTopic.addSubscription(
     new subs.SqsSubscription(mailerQ)
     );
-
-    newImageTopic.addSubscription(
-      new subs.SqsSubscription(badMailerQ)
-      );
 
     const newImageMailEventSource = new events.SqsEventSource(mailerQ, {
       batchSize: 5,
