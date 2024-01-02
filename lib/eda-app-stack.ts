@@ -193,23 +193,23 @@ export class EDAAppStack extends cdk.Stack {
 }
 
  
-const ddbDocClient = new DynamoDBClient({ region: process.env.REGION });
+// const ddbDocClient = new DynamoDBClient({ region: process.env.REGION });
 
-exports.handler = async (event: { Records: { s3: any; }[]; }) => {
-  // Get the S3 event
-  const s3Event = event.Records[0].s3;
+// exports.handler = async (event: { Records: { s3: any; }[]; }) => {
+//   // Get the S3 event
+//   const s3Event = event.Records[0].s3;
 
-  // Get the key of the new object
-  const key = s3Event.object.key;
+//   // Get the key of the new object
+//   const key = s3Event.object.key;
 
-  // Get the table name from the environment variable
-  const tableName = process.env.TABLE_NAME;
+//   // Get the table name from the environment variable
+//   const tableName = process.env.TABLE_NAME;
 
-  // Put the key into the table
-  const commandOutput = await ddbDocClient.send(
-    new PutCommand({
-      TableName: tableName,
-      Item:  key ,
-    })
-  );
-}
+//   // Put the key into the table
+//   const commandOutput = await ddbDocClient.send(
+//     new PutCommand({
+//       TableName: tableName,
+//       Item:  key ,
+//     })
+//   );
+// }
